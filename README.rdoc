@@ -1,0 +1,128 @@
+= Address Book
+
+This is an example rails application aimed to highlight issues creating nested resources using custom XML.
+
+== Background
+
+We want to implement a REST API that allows us to create users with addresses.  The resource representation must conform to an specifc XSD (hence it can not be "rails-centric").  Example User XML is as follows:
+
+  <user>
+    <name>Joe Bloggs</name>
+    <addresses>
+      <address>
+         <street>Church Street</street>
+      </address>
+      <address>
+         <street>Coast Road</street>
+      </address>
+    </addresses>
+  </user>
+
+
+== Implementation
+
+We use rails scaffolding to generate the revelant models, controllers etc... and update the classes to show our user address association:
+
+class Address
+  belongs_to :user
+  attr_accessible :street
+end
+
+class User < ActiveRecord::Base
+  has_many :addresses
+
+  accepts_nested_attributes_for :addresses
+  attr_accessible :name, :addresses, :addresses_attributes
+end
+
+== The problem
+
+So we try to create some users using our API:
+
+Sending a curl request with the example XML above results in an exception:
+
+  $ curl -X POST --header "Accept: application/xml" --header "Content-Type: application/xml" http://localhost:3000/users  --data "<user><name>Joe Bloggs</name><addresses type='array'><address><street>Church Street</street></address></addresses></user>"
+
+Log output:
+
+  Started POST "/users" for 127.0.0.1 at 2012-09-20 12:36:59 +0100
+  Connecting to database specified by database.yml
+  Processing by UsersController#create as XML
+    Parameters: {"user"=>{"name"=>"Joe Bloggs", "addresses"=>[{"street"=>"Church Street"}]}}
+  WARNING: Can't verify CSRF token authenticity
+  Completed 500 Internal Server Error in 82ms
+
+  ActiveRecord::AssociationTypeMismatch (Address(#70078236309060) expected, got ActiveSupport::HashWithIndifferentAccess(#21170520)):
+    app/controllers/users_controller.rb:43:in `new'
+    app/controllers/users_controller.rb:43:in `create'
+
+
+    Rendered /home/martyn/.rvm/gems/ruby-1.9.2-p318@ime/gems/actionpack-3.2.8/lib/action_dispatch/middleware/templates/rescues/_trace.erb (0.8ms)
+    Rendered /home/martyn/.rvm/gems/ruby-1.9.2-p318@ime/gems/actionpack-3.2.8/lib/action_dispatch/middleware/templates/rescues/_request_and_response.erb (0.7ms)
+    Rendered /home/martyn/.rvm/gems/ruby-1.9.2-p318@ime/gems/actionpack-3.2.8/lib/action_dispatch/middleware/templates/rescues/diagnostics.erb within rescues/layout (23.9ms)
+
+=== Why does it behave like this?
+
+Well we can see from the parameters in the log output that rails parses the XML so that XML element names match up to the hash keys accordingly.  This makes sense.  However, in order to use accepts_nested_attributes_for method on the model.  Rails expects the nested address information to take the form of adddresses_attributes.  If we change our XML accordingly we can see that it all works swimmingly.
+
+  $ curl -X POST --header "Accept: application/xml" --header "Content-Type: application/xml" http://localhost:3000/users  --data "<user><name>Joe Bloggs</name><addresses_attributes type='array'><address><street>Church Street</street></address></addresses_attributes></user>"
+
+  <?xml version="1.0" encoding="UTF-8"?>
+  <user>
+    <created-at type="datetime">2012-09-20T11:48:17Z</created-at>
+    <id type="integer">4</id>
+    <name>Joe Bloggs</name>
+    <updated-at type="datetime">2012-09-20T11:48:17Z</updated-at>
+  </user>
+
+Ok so the response XML does not conform to our schema.  But that's easily achievable using templates.
+
+=== Why are we restricted to <association>_attribute format.
+
+ActiveRecord uses meta programming to add the appropriate getters and setters when adding associations to a class.
+
+For example.  Our class has the association:
+
+  has_many :addresses
+
+At runtime, rails adds the following getters and setters to the class.
+
+  def addresses  # Getter
+  def addresses= # Setter
+
+This is all fine.
+
+However, the same approach is used when setting accept_nested_attributes_for.  We would like set addresses= setter on our class so we can create nested objects represented by :addresses in the hash we send to new:  i.e.
+
+  @user = Address.new({"user"=>{"name"=>"Joe Bloggs", "addresses"=>[{"street"=>"Church Street"}]}})
+
+However, this is already taken by addresses setter, set by our assoication.  If we override the association setter then we'd not be able to set the addresses to standard objects.  for example:
+
+  @user.addresses = [address1, address2]
+
+== How do we get round this?
+
+So, I've thought about possible ways to get round the problem.  But I'm unsure on the correct approach.  This issue is going to hit us many times across our various projects.  So we really need to solve it properly.
+
+Some possiblities are:
+
+=== Override to association addresses= setter.
+
+We could patch ActiveRecord::Base associations so that the resulting setter methods check to see if the parameters passed to it contain a map or objects.  If it contains objects then continue as usual.  If it contains a map then check to see if we have a addresses_attributes= method.  If it does then pass on the paramters to that method.
+
+Advantage;  Fixes the issue in one place.  Reduces code/complexity else where
+Disadvantages: Could introduce bugs into native Rails code, Could be time consuming complex task.
+
+=== Create custom transformers for XML/JSON
+
+We could unmarshall the XML ourselves so that we generate hashes with the appropriate _attributes keys.
+
+Advantage: We don't have to monkey patch rails native code.  Separates this logic from the controllers, models
+Disdvantege: Could be tricky to implement, and less efficient.  We would need to create transformers for each content-type.
+=== Update the resulting hashes in the controllers
+
+We could look for specific keys in the params hash and transform them in the relevant _attributes fields.
+
+Advantage:  Does not interfere with any Rails processes.
+Disadvantages: Requires a lot of code in controllers for processing different types of objects.
+
