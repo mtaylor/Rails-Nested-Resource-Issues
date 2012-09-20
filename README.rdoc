@@ -110,19 +110,40 @@ Some possiblities are:
 
 We could patch ActiveRecord::Base associations so that the resulting setter methods check to see if the parameters passed to it contain a map or objects.  If it contains objects then continue as usual.  If it contains a map then check to see if we have a addresses_attributes= method.  If it does then pass on the paramters to that method.
 
-Advantage;  Fixes the issue in one place.  Reduces code/complexity else where
-Disadvantages: Could introduce bugs into native Rails code, Could be time consuming complex task.
+==== Advantage:
+
+  * Fixes the issue in one place.  
+  * Reduces code/complexity else where
+
+==== Disadvantages: 
+
+  * Could introduce bugs into native Rails code, 
+  * Could be time consuming complex task.
+  * Maintainability problems during upgrades
 
 === Create custom transformers for XML/JSON
 
 We could unmarshall the XML ourselves so that we generate hashes with the appropriate _attributes keys.
 
-Advantage: We don't have to monkey patch rails native code.  Separates this logic from the controllers, models
-Disdvantege: Could be tricky to implement, and less efficient.  We would need to create transformers for each content-type.
+==== Advantage: 
+
+  * We don't have to monkey patch rails native code.  
+  * Separates this logic from the controllers, models
+
+==== Disdvantege: 
+
+  * Could be tricky to implement, and less efficient.  
+  * We would need to create transformers for each content-type.
+
 === Update the resulting hashes in the controllers
 
 We could look for specific keys in the params hash and transform them in the relevant _attributes fields.
 
-Advantage:  Does not interfere with any Rails processes.
-Disadvantages: Requires a lot of code in controllers for processing different types of objects.
+==== Advantage:  
+
+  * Does not interfere with any Rails processes.
+
+==== Disadvantages: 
+
+  * Requires a lot of code in controllers for processing different types of objects.
 
